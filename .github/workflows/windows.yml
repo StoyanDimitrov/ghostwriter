@@ -119,6 +119,44 @@ jobs:
             -Encoding UTF8 `
             (Join-Path $ghostwriterDir "ghostwriter.py")
 
+      - name: Diagnose Craft setup
+        shell: pwsh
+        run: |
+          Write-Host "=== Workspace ==="
+          Write-Host "${{ github.workspace }}"
+
+          Write-Host ""
+          Write-Host "=== CraftMaster ==="
+          Write-Host "${{ env.CRAFT_MASTER_LOCATION }}"
+          Get-ChildItem "${{ env.CRAFT_MASTER_LOCATION }}"
+
+          Write-Host ""
+          Write-Host "=== CraftMaster config ==="
+          Write-Host "${{ env.CRAFT_MASTER_CONFIG }}"
+
+          if (Test-Path "${{ env.CRAFT_MASTER_CONFIG }}") {
+              Get-Content "${{ env.CRAFT_MASTER_CONFIG }}"
+          }
+          else {
+              Write-Host "CONFIG DOES NOT EXIST"
+          }
+
+          Write-Host ""
+          Write-Host "=== craft-work ==="
+          $craftRoot = Join-Path "${{ github.workspace }}" "craft-work"
+
+          if (Test-Path $craftRoot) {
+              Get-ChildItem $craftRoot
+          }
+          else {
+              Write-Host "CRAFT-WORK DOES NOT EXIST"
+          }
+
+          Write-Host ""
+          Write-Host "=== Workspace directories ==="
+          Get-ChildItem "${{ github.workspace }}" -Directory |
+              Select-Object FullName
+
       - name: Create CraftMaster configuration
         shell: pwsh
         run: |
