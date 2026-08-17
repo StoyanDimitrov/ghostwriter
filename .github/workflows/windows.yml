@@ -300,25 +300,20 @@ jobs:
         run: |
           $file = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\CraftSetupHelper.py"
 
-          Write-Host "Patching CraftSetupHelper.py:"
+          Write-Host "Patching:"
           Write-Host $file
 
           $content = Get-Content $file -Raw
 
-          $old = @'
-                component = "Microsoft.VisualStudio.Component.VC."
-                component += f"v{CraftCore.compiler.getMsvcPlatformToolset()}.x86.x64"
-'@
+          $pattern = 'component = "Microsoft\.VisualStudio\.Component\.VC\."\s*component \+= f"v\{CraftCore\.compiler\.getMsvcPlatformToolset\(\)\}\.x86\.x64"'
 
-          $new = @'
-                component = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
-'@
+          $replacement = 'component = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"'
 
-          if (-not $content.Contains($old)) {
-              throw "Expected Craft MSVC component detection code was not found."
+          if ($content -notmatch $pattern) {
+              throw "Could not find Craft's VCv143 component detection code."
           }
 
-          $content = $content.Replace($old, $new)
+          $content = $content -replace $pattern, $replacement
 
           Set-Content `
             -Path $file `
@@ -326,10 +321,11 @@ jobs:
             -Encoding UTF8
 
           Write-Host ""
-          Write-Host "Patched CraftSetupHelper.py."
+          Write-Host "Patch applied."
 
           Write-Host ""
-          Write-Host "Result:"
+          Write-Host "Relevant CraftSetupHelper.py lines:"
+
           $lines = Get-Content $file
 
           for ($i = 238; $i -le 252; $i++) {
