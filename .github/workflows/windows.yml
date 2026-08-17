@@ -209,6 +209,74 @@ jobs:
           Write-Host "MSBuild.exe:"
           where.exe msbuild
 
+
+
+      - name: Fix Craft Visual Studio detection
+        shell: pwsh
+        run: |
+          $craftVsWhere = Join-Path `
+            "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft" `
+            "bin\3rdparty\vswhere\vswhere.exe"
+
+          $systemVsWhere = Join-Path `
+            "${env:ProgramFiles(x86)}" `
+            "Microsoft Visual Studio\Installer\vswhere.exe"
+
+          if (-not (Test-Path $craftVsWhere)) {
+            throw "Craft's bundled vswhere.exe was not found: $craftVsWhere"
+          }
+
+          if (-not (Test-Path $systemVsWhere)) {
+            throw "GitHub runner vswhere.exe was not found: $systemVsWhere"
+          }
+
+          Write-Host "Craft vswhere:"
+          & $craftVsWhere -version
+
+          Write-Host ""
+          Write-Host "Runner vswhere:"
+          & $systemVsWhere -version
+
+          Write-Host ""
+          Write-Host "Runner Visual Studio installations:"
+          & $systemVsWhere `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+
+          Write-Host ""
+          Write-Host "Replacing Craft's bundled vswhere with runner's version..."
+
+          Copy-Item `
+            $systemVsWhere `
+            $craftVsWhere `
+            -Force
+
+          Write-Host ""
+          Write-Host "Craft vswhere after replacement:"
+          & $craftVsWhere -version
+
+          Write-Host ""
+          Write-Host "Testing the exact Craft MSVC 2022 query:"
+
+          $result = & $craftVsWhere `
+            -property installationPath `
+            -nologo `
+            -latest `
+            -products "*" `
+            -version "[17,18)" `
+            -requires "Microsoft.VisualStudio.Component.VC.v143.x86.x64"
+
+          if (-not $result) {
+            throw "vswhere still cannot find the VS2022 v143 installation."
+          }
+
+          Write-Host "Found:"
+          Write-Host $result
+
+
+
       - name: Set up Craft
         shell: pwsh
         run: |
