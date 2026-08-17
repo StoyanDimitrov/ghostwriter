@@ -401,6 +401,7 @@ jobs:
           python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
             --config "${{ env.CRAFT_MASTER_CONFIG }}" `
             --targets "${{ env.CRAFT_TARGET }}" `
+            -c `
             --install-deps `
             ghostwriter
 
