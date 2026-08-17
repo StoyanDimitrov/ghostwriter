@@ -217,6 +217,141 @@ jobs:
             --targets "${{ env.CRAFT_TARGET }}" `
             --setup
 
+      - name: Fix Craft Visual Studio detection
+        shell: pwsh
+        run: |
+          $craft = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft"
+
+          $craftVsWhere = Join-Path `
+            $craft `
+            "bin\3rdparty\vswhere\vswhere.exe"
+
+          $systemVsWhere = `
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+
+          if (-not (Test-Path $systemVsWhere)) {
+            throw "System vswhere.exe not found: $systemVsWhere"
+          }
+
+          if (-not (Test-Path $craftVsWhere)) {
+            throw "Craft vswhere.exe not found: $craftVsWhere"
+          }
+
+          Write-Host "System vswhere:"
+          Write-Host $systemVsWhere
+
+          Write-Host ""
+          Write-Host "Craft vswhere before replacement:"
+          & $craftVsWhere -version
+
+          Write-Host ""
+          Write-Host "System vswhere:"
+          & $systemVsWhere -version
+
+          Write-Host ""
+          Write-Host "Visual Studio detected by system vswhere:"
+
+          $vsPath = & $systemVsWhere `
+            -latest `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+            -property installationPath
+
+          if (-not $vsPath) {
+            throw "System vswhere could not find Visual Studio with MSVC."
+          }
+
+          $vsPath = $vsPath.Trim()
+
+          Write-Host $vsPath
+
+          Write-Host ""
+          Write-Host "Replacing Craft's bundled vswhere..."
+
+          Copy-Item `
+            $systemVsWhere `
+            $craftVsWhere `
+            -Force
+
+          Write-Host ""
+          Write-Host "Craft vswhere after replacement:"
+
+          & $craftVsWhere -version
+
+          Write-Host ""
+          Write-Host "Testing Craft vswhere with VC.Tools..."
+
+          $result = & $craftVsWhere `
+            -property installationPath `
+            -nologo `
+            -latest `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+
+          if (-not $result) {
+            throw "Craft's replaced vswhere cannot find Visual Studio with MSVC."
+          }
+
+          Write-Host "Craft will see Visual Studio at:"
+          Write-Host $result
+
+      - name: Fix Craft MSVC component detection
+        shell: pwsh
+        run: |
+          $file = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\CraftSetupHelper.py"
+
+          Write-Host "Patching CraftSetupHelper.py:"
+          Write-Host $file
+
+          $content = Get-Content $file -Raw
+
+          $old = @'
+                component = "Microsoft.VisualStudio.Component.VC."
+                component += f"v{CraftCore.compiler.getMsvcPlatformToolset()}.x86.x64"
+'@
+
+          $new = @'
+                component = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+'@
+
+          if (-not $content.Contains($old)) {
+              throw "Expected Craft MSVC component detection code was not found."
+          }
+
+          $content = $content.Replace($old, $new)
+
+          Set-Content `
+            -Path $file `
+            -Value $content `
+            -Encoding UTF8
+
+          Write-Host ""
+          Write-Host "Patched CraftSetupHelper.py."
+
+          Write-Host ""
+          Write-Host "Result:"
+          $lines = Get-Content $file
+
+          for ($i = 238; $i -le 252; $i++) {
+              if ($i -le $lines.Count) {
+                  "{0}: {1}" -f $i, $lines[$i - 1]
+              }
+          }
+
+      - name: Show Craft environment
+        shell: pwsh
+        run: |
+          $craftRoot = "${{ github.workspace }}\craft-work"
+
+          Write-Host "Craft root:"
+          Get-ChildItem $craftRoot
+
+          Write-Host ""
+          Write-Host "Craft settings:"
+          Get-Content `
+            "$craftRoot\${{ env.CRAFT_TARGET }}\etc\CraftSettings.ini" `
+            -ErrorAction Stop
+
       - name: Diagnose Craft VC detection deeply
         shell: pwsh
         run: |
