@@ -141,6 +141,7 @@ jobs:
           [windows-cl-msvc2022-x86_64]
           General/KDECompiler = msvc2022
           General/Architecture = x64
+          "@
 
           Write-Host "CraftMaster configuration:"
           Get-Content "${{ env.CRAFT_MASTER_CONFIG }}"
