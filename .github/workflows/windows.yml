@@ -359,6 +359,44 @@ jobs:
             }
 
 
+      - name: Diagnose Craft VC detection
+        shell: pwsh
+        run: |
+          $file = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\CraftSetupHelper.py"
+
+          Write-Host "=== CraftSetupHelper.py ==="
+          $lines = Get-Content $file
+
+          for ($i = 185; $i -le 260; $i++) {
+            if ($i -le $lines.Count) {
+              "{0}: {1}" -f $i, $lines[$i - 1]
+            }
+          }
+
+          Write-Host ""
+          Write-Host "=== Craft's patched vswhere ==="
+
+          $vswhere = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\3rdparty\vswhere\vswhere.exe"
+
+          & $vswhere `
+            -property installationPath `
+            -nologo `
+            -latest `
+            -products "*"
+
+          Write-Host ""
+          Write-Host "=== VS 2022 + VC component ==="
+
+          & $vswhere `
+            -property installationPath `
+            -nologo `
+            -latest `
+            -products "*" `
+            -version "[17,18)" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+
+
+
       - name: Build ghostwriter
         shell: pwsh
         run: |
