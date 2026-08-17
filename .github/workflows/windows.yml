@@ -339,14 +339,40 @@ jobs:
         run: |
           $craftRoot = "${{ github.workspace }}\craft-work"
 
-          Write-Host "Craft root:"
+          Write-Host "=== Craft root ==="
           Get-ChildItem $craftRoot
 
           Write-Host ""
-          Write-Host "Craft settings:"
-          Get-Content `
-            "$craftRoot\${{ env.CRAFT_TARGET }}\etc\CraftSettings.ini" `
+          Write-Host "=== Target directory ==="
+          Get-ChildItem `
+            "$craftRoot\${{ env.CRAFT_TARGET }}" `
             -ErrorAction Stop
+
+          Write-Host ""
+          Write-Host "=== Searching for CraftSettings.ini ==="
+
+          Get-ChildItem `
+            "$craftRoot\${{ env.CRAFT_TARGET }}" `
+            -Recurse `
+            -File `
+            -Filter "CraftSettings.ini" `
+            -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              Write-Host $_.FullName
+            }
+
+          Write-Host ""
+          Write-Host "=== Searching for Craft settings files ==="
+
+          Get-ChildItem `
+            "$craftRoot\${{ env.CRAFT_TARGET }}" `
+            -Recurse `
+            -File `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -match "CraftSettings|settings"
+            } |
+            Select-Object FullName
 
       - name: Diagnose Craft VC detection deeply
         shell: pwsh
@@ -556,45 +582,46 @@ jobs:
             }
 
 
-      - name: Show Craft environment
+      - name: Diagnose Craft MSVC detection
         shell: pwsh
         run: |
-          $craftRoot = "${{ github.workspace }}\craft-work"
+          $target = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}"
+          $craft = "$target\craft"
 
-          Write-Host "=== Craft root ==="
-          Get-ChildItem $craftRoot
-
-          Write-Host ""
-          Write-Host "=== Target directory ==="
-          Get-ChildItem `
-            "$craftRoot\${{ env.CRAFT_TARGET }}" `
-            -ErrorAction Stop
+          Write-Host "=== CraftSettings.ini ==="
+          Get-Content "$target\etc\CraftSettings.ini"
 
           Write-Host ""
-          Write-Host "=== Searching for CraftSettings.ini ==="
+          Write-Host "=== Craft vswhere ==="
 
-          Get-ChildItem `
-            "$craftRoot\${{ env.CRAFT_TARGET }}" `
-            -Recurse `
-            -File `
-            -Filter "CraftSettings.ini" `
-            -ErrorAction SilentlyContinue |
-            ForEach-Object {
-              Write-Host $_.FullName
-            }
+          $vswhere = "$craft\bin\3rdparty\vswhere\vswhere.exe"
+
+          & $vswhere `
+            -latest `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+            -property installationPath
 
           Write-Host ""
-          Write-Host "=== Searching for Craft settings files ==="
+          Write-Host "=== CraftSetupHelper relevant code ==="
 
-          Get-ChildItem `
-            "$craftRoot\${{ env.CRAFT_TARGET }}" `
-            -Recurse `
-            -File `
-            -ErrorAction SilentlyContinue |
-            Where-Object {
-              $_.Name -match "CraftSettings|settings"
-            } |
-            Select-Object FullName
+          $file = "$craft\bin\CraftSetupHelper.py"
+          $lines = Get-Content $file
+
+          for ($i = 194; $i -le 267; $i++) {
+            "{0}: {1}" -f $i, $lines[$i - 1]
+          }
+
+          Write-Host ""
+          Write-Host "=== Running actual Craft command ==="
+
+          python "${{ env.CRAFT_MASTER_LOCATION }}\CraftMaster.py" `
+            --config "${{ env.CRAFT_MASTER_CONFIG }}" `
+            --targets "${{ env.CRAFT_TARGET }}" `
+            --verbose `
+            -c `
+            --install-deps `
+            ghostwriter
 
       - name: Build ghostwriter
         shell: pwsh
