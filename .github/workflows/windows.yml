@@ -10,146 +10,275 @@ permissions:
 env:
   CRAFT_TARGET: windows-cl-msvc2022-x86_64
   CRAFT_MASTER_LOCATION: ${{ github.workspace }}/CraftMaster
+  CRAFT_MASTER_CONFIG: ${{ github.workspace }}/craftmaster.ini
 
 jobs:
   build:
     name: Build ghostwriter
     runs-on: windows-2022
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     steps:
-      - name: Checkout workflow
+      - name: Checkout fork
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Download CraftMaster
+      - name: Clone CraftMaster
         shell: pwsh
         run: |
-          git clone -q --depth=1 `
-            https://invent.kde.org/packaging/craftmaster.git `
+          git clone --depth=1 `
+            https://github.com/KDE/craftmaster.git `
             "${{ env.CRAFT_MASTER_LOCATION }}"
 
-      - name: Add local Craft blueprint repository
+      - name: Install CraftMaster blueprint
         shell: pwsh
         run: |
-          python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
-            --target "${{ env.CRAFT_TARGET }}" `
-            -c `
-            --add-blueprint-repository `
-            "${{ github.workspace }}/craft"
+          $blueprintRoot = Join-Path `
+            "${{ env.CRAFT_MASTER_LOCATION }}" `
+            "blueprints"
+
+          $ghostwriterDir = Join-Path `
+            $blueprintRoot `
+            "kde\ghostwriter"
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $ghostwriterDir | Out-Null
+
+          @'
+          import info
+
+          from Package.CMakePackageBase import CMakePackageBase
+
+
+          class subinfo(info.infoclass):
+
+              def setTargets(self):
+                  self.displayName = "ghostwriter"
+                  self.description = "Text editor for Markdown"
+                  self.webpage = "https://github.com/KDE/ghostwriter"
+
+                  self.svnTargets["master"] = \
+                      "https://github.com/KDE/ghostwriter.git|master"
+
+                  self.defaultTarget = "master"
+
+              def setDependencies(self):
+                  self.buildDependencies[
+                      "kde/frameworks/extra-cmake-modules"
+                  ] = None
+
+                  self.runtimeDependencies["libs/qt/qtbase"] = None
+                  self.runtimeDependencies["libs/qt/qtsvg"] = None
+                  self.runtimeDependencies["libs/qt/qtwebchannel"] = None
+                  self.runtimeDependencies["libs/qt/qtwebengine"] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier1/kcoreaddons"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier1/kwidgetsaddons"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier1/sonnet"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier2/kconfig"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier3/kconfigwidgets"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier3/kxmlgui"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier3/kiconthemes"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier1/breeze-icons"
+                  ] = None
+
+
+          class Package(CMakePackageBase):
+
+              def __init__(self, **args):
+                  CMakePackageBase.__init__(self, **args)
+          '@ | Set-Content `
+            -Encoding UTF8 `
+            (Join-Path $ghostwriterDir "ghostwriter.py")
+
+      - name: Create CraftMaster configuration
+        shell: pwsh
+        run: |
+          $root = "${{ github.workspace }}\craft-work"
+
+          @"
+          [General]
+          Branch = master
+          ShallowClone = True
+
+          [Variables]
+          Root = $root
+
+          [GeneralSettings]
+          Compile/BuildType = Release
+          ContinuousIntegration/Enabled = True
+          General/KDECompiler = msvc2022
+          General/Architecture = x64
+
+          [$env:CRAFT_TARGET]
+          General/KDECompiler = msvc2022
+          General/Architecture = x64
+          "@ | Set-Content `
+            -Encoding UTF8 `
+            "${{ env.CRAFT_MASTER_CONFIG }}"
+
+          Write-Host "CraftMaster configuration:"
+          Get-Content "${{ env.CRAFT_MASTER_CONFIG }}"
 
       - name: Set up Craft
         shell: pwsh
         run: |
           python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
-            --target "${{ env.CRAFT_TARGET }}" `
-            -c craft
+            --config "${{ env.CRAFT_MASTER_CONFIG }}" `
+            --targets "${{ env.CRAFT_TARGET }}" `
+            --setup
 
-      - name: Build upstream ghostwriter
+      - name: Show Craft environment
+        shell: pwsh
+        run: |
+          $craftRoot = "${{ github.workspace }}\craft-work"
+
+          Write-Host "Craft root:"
+          Get-ChildItem $craftRoot
+
+          Write-Host ""
+          Write-Host "Craft settings:"
+          Get-Content `
+            "$craftRoot\${{ env.CRAFT_TARGET }}\etc\CraftSettings.ini" `
+            -ErrorAction Stop
+
+      - name: Build ghostwriter
         shell: pwsh
         run: |
           python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
-            --target "${{ env.CRAFT_TARGET }}" `
+            --config "${{ env.CRAFT_MASTER_CONFIG }}" `
+            --targets "${{ env.CRAFT_TARGET }}" `
             -c `
-            --options ghostwriter.srcDir="https://github.com/KDE/ghostwriter.git|master|" `
-            --ignoreInstalled `
+            --install-deps `
             ghostwriter
 
       - name: Package ghostwriter
         shell: pwsh
         run: |
           python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
-            --target "${{ env.CRAFT_TARGET }}" `
+            --config "${{ env.CRAFT_MASTER_CONFIG }}" `
+            --targets "${{ env.CRAFT_TARGET }}" `
             -c `
             --package `
             ghostwriter
 
-      - name: Find Craft package
+      - name: Find generated installer
         shell: pwsh
         run: |
-          Write-Host "Searching for Craft packages..."
+          $root = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}"
 
-          Get-ChildItem `
-            "${{ github.workspace }}\${{ env.CRAFT_TARGET }}\tmp" `
-            -Recurse `
-            -File `
-            -ErrorAction SilentlyContinue |
-            Select-Object FullName, Length
+          Write-Host "Searching for ghostwriter installer under:"
+          Write-Host $root
 
           $installer = Get-ChildItem `
-            "${{ github.workspace }}\${{ env.CRAFT_TARGET }}\tmp" `
+            $root `
             -Recurse `
-            -Filter "ghostwriter*.exe" `
             -File `
+            -Filter "ghostwriter*.exe" `
             -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.FullName -notmatch "\\bin\\ghostwriter\.exe$"
+            } |
+            Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
           if (-not $installer) {
-            Write-Error "Craft did not produce a ghostwriter installer."
-            exit 1
+            Write-Host "Files matching ghostwriter:"
+            Get-ChildItem `
+              $root `
+              -Recurse `
+              -File `
+              -ErrorAction SilentlyContinue |
+              Where-Object {
+                $_.Name -match "ghostwriter"
+              } |
+              Select-Object FullName, Length
+
+            throw "Could not find the generated ghostwriter installer."
           }
+
+          Write-Host "Installer found:"
+          Write-Host $installer.FullName
 
           Copy-Item `
             $installer.FullName `
             "${{ github.workspace }}\ghostwriter-windows-x64-installer.exe"
 
-          Write-Host "Installer:"
-          Write-Host $installer.FullName
-
       - name: Locate installed ghostwriter
         shell: pwsh
         run: |
+          $root = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}"
+
           $exe = Get-ChildItem `
-            "${{ github.workspace }}\${{ env.CRAFT_TARGET }}" `
+            $root `
             -Recurse `
-            -Filter "ghostwriter.exe" `
             -File `
+            -Filter "ghostwriter.exe" `
             -ErrorAction SilentlyContinue |
             Select-Object -First 1
 
           if (-not $exe) {
-            Write-Error "ghostwriter.exe was not found."
-            exit 1
+            throw "Could not find ghostwriter.exe."
           }
 
-          Write-Host "Found:"
+          Write-Host "ghostwriter.exe:"
           Write-Host $exe.FullName
 
-          "GHOSTWRITER_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
+          "GHOSTWRITER_ROOT=$($exe.Directory.Parent.FullName)" `
+            >> $env:GITHUB_ENV
 
       - name: Create portable ZIP
         shell: pwsh
         run: |
-          $exe = Get-Item $env:GHOSTWRITER_EXE
+          $root = $env:GHOSTWRITER_ROOT
 
-          # Find the Craft install root containing bin/ghostwriter.exe.
-          $bin = $exe.Directory.FullName
-          $root = Split-Path $bin -Parent
-
-          Write-Host "Portable root:"
+          Write-Host "Portable application root:"
           Write-Host $root
 
-          $portable = "${{ github.workspace }}\portable"
+          $portableRoot = `
+            "${{ github.workspace }}\portable\ghostwriter"
 
           New-Item `
             -ItemType Directory `
             -Force `
-            "$portable\ghostwriter" | Out-Null
+            -Path $portableRoot | Out-Null
 
           Copy-Item `
             "$root\*" `
-            "$portable\ghostwriter" `
+            $portableRoot `
             -Recurse `
             -Force
 
           Compress-Archive `
-            -Path "$portable\ghostwriter\*" `
+            -Path "$portableRoot\*" `
             -DestinationPath `
               "${{ github.workspace }}\ghostwriter-windows-x64-portable.zip" `
             -Force
@@ -161,8 +290,7 @@ jobs:
             "${{ github.workspace }}\ghostwriter-windows-x64-portable.zip"
 
           if (-not (Test-Path $zip)) {
-            Write-Error "Portable ZIP was not created."
-            exit 1
+            throw "Portable ZIP was not created."
           }
 
           Add-Type `
@@ -178,14 +306,12 @@ jobs:
 
           if (-not $exe) {
             $archive.Dispose()
-            Write-Error `
-              "Portable ZIP does not contain bin/ghostwriter.exe."
-            exit 1
+            throw "Portable ZIP does not contain bin/ghostwriter.exe."
           }
 
           $archive.Dispose()
 
-          Write-Host "Portable ZIP verified."
+          Write-Host "Portable ZIP verified successfully."
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
