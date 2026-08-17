@@ -555,6 +555,25 @@ jobs:
               $_.Context.PostContext | ForEach-Object { Write-Host $_ }
             }
 
+      - name: Test Craft MSVC detection directly
+        shell: pwsh
+        run: |
+          $craft = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft"
+          $python = "${{ env.pythonLocation }}\python.exe"
+
+          $env:PYTHONPATH = "$craft\bin"
+
+          Write-Host "=== CraftSetupHelper ==="
+          & $python -c "import CraftSetupHelper; print(CraftSetupHelper.__file__)"
+
+          Write-Host ""
+          Write-Host "=== Direct _callVCVER(17) ==="
+
+          $result = & $python -c "from CraftSetupHelper import SetupHelper; print(repr(SetupHelper._callVCVER(17, args=['-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'])))"
+
+          Write-Host "RESULT:"
+          Write-Host $result
+
       - name: Build ghostwriter
         shell: pwsh
         run: |
