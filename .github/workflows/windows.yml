@@ -362,33 +362,41 @@ jobs:
       - name: Build ghostwriter
         shell: pwsh
         run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $craft = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft"
 
-          $vsPath = & $vswhere `
-            -latest `
-            -products * `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -property installationPath
+          $craftVsWhere = Join-Path `
+            $craft `
+            "bin\3rdparty\vswhere\vswhere.exe"
 
-          $vsPath = $vsPath.Trim()
+          $systemVsWhere = `
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 
-          $vsDevCmd = Join-Path `
-            $vsPath `
-            "Common7\Tools\VsDevCmd.bat"
-
-          $envDump = cmd.exe /s /c `
-            "`"$vsDevCmd`" -arch=x64 -host_arch=x64 && set"
-
-          foreach ($line in $envDump) {
-            if ($line -match '^([^=]+)=(.*)$') {
-              Set-Item "env:$($matches[1])" $matches[2]
-            }
+          if (-not (Test-Path $craftVsWhere)) {
+            throw "Craft vswhere not found: $craftVsWhere"
           }
 
-          Write-Host "VSINSTALLDIR=$env:VSINSTALLDIR"
-          Write-Host "VCINSTALLDIR=$env:VCINSTALLDIR"
+          Copy-Item `
+            $systemVsWhere `
+            $craftVsWhere `
+            -Force
 
-          where.exe cl
+          Write-Host "Craft vswhere replaced."
+
+          $found = & $craftVsWhere `
+            -property installationPath `
+            -nologo `
+            -latest `
+            -products "*"
+
+          Write-Host "Craft will see Visual Studio at:"
+          Write-Host $found
+
+          if (-not $found) {
+            throw "Craft vswhere cannot find Visual Studio."
+          }
+
+          Write-Host ""
+          Write-Host "Running Craft..."
 
           python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
             --config "${{ env.CRAFT_MASTER_CONFIG }}" `
