@@ -555,24 +555,27 @@ jobs:
               $_.Context.PostContext | ForEach-Object { Write-Host $_ }
             }
 
-      - name: Test Craft MSVC detection directly
+
+      - name: Diagnose actual Craft MSVC lookup
         shell: pwsh
         run: |
           $craft = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft"
-          $python = "${{ env.pythonLocation }}\python.exe"
 
-          $env:PYTHONPATH = "$craft\bin"
-
-          Write-Host "=== CraftSetupHelper ==="
-          & $python -c "import CraftSetupHelper; print(CraftSetupHelper.__file__)"
+          Write-Host "=== CraftSettings.ini ==="
+          Get-Content `
+            "$craft\etc\CraftSettings.ini" `
+            -ErrorAction Stop
 
           Write-Host ""
-          Write-Host "=== Direct _callVCVER(17) ==="
+          Write-Host "=== Running Craft with verbose logging ==="
 
-          $result = & $python -c "from CraftSetupHelper import SetupHelper; print(repr(SetupHelper._callVCVER(17, args=['-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'])))"
-
-          Write-Host "RESULT:"
-          Write-Host $result
+          python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
+            --config "${{ env.CRAFT_MASTER_CONFIG }}" `
+            --targets "${{ env.CRAFT_TARGET }}" `
+            --verbose `
+            -c `
+            --install-deps `
+            ghostwriter
 
       - name: Build ghostwriter
         shell: pwsh
