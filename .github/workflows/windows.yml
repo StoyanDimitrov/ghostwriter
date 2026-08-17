@@ -232,6 +232,50 @@ jobs:
             -ErrorAction Stop
 
 
+
+      - name: Diagnose Craft Visual Studio detection
+        shell: pwsh
+        run: |
+          $craft = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft"
+
+          Write-Host "=== Craft source ==="
+          Write-Host $craft
+
+          Write-Host "=== Searching Craft for the exact error ==="
+
+          Get-ChildItem `
+            $craft `
+            -Recurse `
+            -File `
+            -Include *.py |
+            Select-String `
+              -Pattern "Unable to locate Visual Studio" `
+              -Context 8,12 |
+            ForEach-Object {
+              Write-Host ""
+              Write-Host "FILE: $($_.Path)"
+              Write-Host "LINE: $($_.LineNumber)"
+              $_.Context.PreContext | ForEach-Object { Write-Host $_ }
+              Write-Host ">>> $($_.Line)"
+              $_.Context.PostContext | ForEach-Object { Write-Host $_ }
+            }
+
+          Write-Host ""
+          Write-Host "=== Craft compiler settings ==="
+
+          Get-ChildItem `
+            $craft `
+            -Recurse `
+            -File `
+            -Include *.py |
+            Select-String `
+              -Pattern "VisualStudio|vswhere|VSINSTALLDIR|KDECompiler|msvc2022" |
+            Select-Object -First 100 |
+            ForEach-Object {
+              Write-Host "$($_.Path):$($_.LineNumber): $($_.Line)"
+            }
+
+
       - name: Build ghostwriter
         shell: pwsh
         run: |
