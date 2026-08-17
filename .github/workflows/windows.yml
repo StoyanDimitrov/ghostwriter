@@ -209,11 +209,6 @@ jobs:
           Write-Host "MSBuild.exe:"
           where.exe msbuild
 
-
-
-
-
-
       - name: Set up Craft
         shell: pwsh
         run: |
@@ -222,118 +217,31 @@ jobs:
             --targets "${{ env.CRAFT_TARGET }}" `
             --setup
 
-      - name: Fix Craft Visual Studio detection
+      - name: Diagnose Craft VC detection deeply
         shell: pwsh
         run: |
-          $craftVsWhere = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\3rdparty\vswhere\vswhere.exe"
-          $systemVsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $file = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\CraftSetupHelper.py"
+          $lines = Get-Content $file
 
-          Write-Host "Craft vswhere:"
-          Write-Host $craftVsWhere
+          Write-Host "=== CraftSetupHelper.py: 180-275 ==="
 
-          Write-Host "System vswhere:"
-          Write-Host $systemVsWhere
-
-          if (-not (Test-Path $craftVsWhere)) {
-            Write-Host ""
-            Write-Host "Craft's expected vswhere was not found."
-            Write-Host "Searching for it..."
-
-            Get-ChildItem `
-              "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft" `
-              -Recurse `
-              -File `
-              -Filter "vswhere.exe" `
-              -ErrorAction SilentlyContinue |
-              ForEach-Object {
-                Write-Host $_.FullName
-              }
-
-            throw "Craft's bundled vswhere.exe was not found."
-          }
-
-          if (-not (Test-Path $systemVsWhere)) {
-            throw "System vswhere.exe was not found."
+          for ($i = 180; $i -le 275; $i++) {
+            if ($i -le $lines.Count) {
+              "{0}: {1}" -f $i, $lines[$i - 1]
+            }
           }
 
           Write-Host ""
-          Write-Host "Craft vswhere version:"
-          & $craftVsWhere -version
-
-          Write-Host ""
-          Write-Host "System vswhere version:"
-          & $systemVsWhere -version
-
-          Write-Host ""
-          Write-Host "Visual Studio detected by system vswhere:"
-          & $systemVsWhere `
-            -latest `
-            -products "*" `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -property installationPath
-
-          Write-Host ""
-          Write-Host "Replacing Craft's bundled vswhere..."
-
-          Copy-Item `
-            $systemVsWhere `
-            $craftVsWhere `
-            -Force
-
-          Write-Host ""
-          Write-Host "Testing Craft's vswhere:"
-
-          $result = & $craftVsWhere `
-            -property installationPath `
-            -nologo `
-            -latest `
-            -products "*" `
-            -version "[17,18)" `
-            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
-
-          if (-not $result) {
-            throw "Craft's vswhere still cannot find Visual Studio 2022."
-          }
-
-          Write-Host "Found Visual Studio:"
-          Write-Host $result
-
-
-
-      - name: Show Craft environment
-        shell: pwsh
-        run: |
-          $craftRoot = "${{ github.workspace }}\craft-work"
-
-          Write-Host "Craft root:"
-          Get-ChildItem $craftRoot
-
-          Write-Host ""
-          Write-Host "Craft settings:"
-          Get-Content `
-            "$craftRoot\${{ env.CRAFT_TARGET }}\etc\CraftSettings.ini" `
-            -ErrorAction Stop
-
-
-
-      - name: Diagnose Craft Visual Studio detection
-        shell: pwsh
-        run: |
-          $craft = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft"
-
-          Write-Host "=== Craft source ==="
-          Write-Host $craft
-
-          Write-Host "=== Searching Craft for the exact error ==="
+          Write-Host "=== Calls to _callVCVER ==="
 
           Get-ChildItem `
-            $craft `
+            "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft" `
             -Recurse `
             -File `
             -Include *.py |
             Select-String `
-              -Pattern "Unable to locate Visual Studio" `
-              -Context 8,12 |
+              -Pattern "_callVCVER" `
+              -Context 5,8 |
             ForEach-Object {
               Write-Host ""
               Write-Host "FILE: $($_.Path)"
@@ -344,96 +252,71 @@ jobs:
             }
 
           Write-Host ""
-          Write-Host "=== Craft compiler settings ==="
+          Write-Host "=== Craft compiler signature ==="
 
-          Get-ChildItem `
-            $craft `
-            -Recurse `
-            -File `
-            -Include *.py |
-            Select-String `
-              -Pattern "VisualStudio|vswhere|VSINSTALLDIR|KDECompiler|msvc2022" |
+          $compiler = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\CraftCompiler.py"
+
+          Select-String `
+            -Path $compiler `
+            -Pattern "msvc2022|signature|Abi|version" `
+            -Context 3,5 |
             Select-Object -First 100 |
             ForEach-Object {
-              Write-Host "$($_.Path):$($_.LineNumber): $($_.Line)"
+              Write-Host ""
+              Write-Host "$($_.Path):$($_.LineNumber)"
+              $_.Context.PreContext | ForEach-Object { Write-Host $_ }
+              Write-Host ">>> $($_.Line)"
+              $_.Context.PostContext | ForEach-Object { Write-Host $_ }
             }
-
-
-      - name: Diagnose Craft VC detection
-        shell: pwsh
-        run: |
-          $file = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\CraftSetupHelper.py"
-
-          Write-Host "=== CraftSetupHelper.py ==="
-          $lines = Get-Content $file
-
-          for ($i = 185; $i -le 260; $i++) {
-            if ($i -le $lines.Count) {
-              "{0}: {1}" -f $i, $lines[$i - 1]
-            }
-          }
 
           Write-Host ""
-          Write-Host "=== Craft's patched vswhere ==="
+          Write-Host "=== Direct vswhere tests ==="
 
           $vswhere = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\3rdparty\vswhere\vswhere.exe"
 
+          Write-Host "--- Any VS with VC ---"
           & $vswhere `
-            -property installationPath `
-            -nologo `
             -latest `
-            -products "*"
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+            -property installationPath
 
           Write-Host ""
-          Write-Host "=== VS 2022 + VC component ==="
-
+          Write-Host "--- VS 2022 with VC ---"
           & $vswhere `
-            -property installationPath `
-            -nologo `
             -latest `
             -products "*" `
             -version "[17,18)" `
-            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+            -property installationPath
 
+          Write-Host ""
+          Write-Host "--- Catalog product version ---"
+          & $vswhere `
+            -latest `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+            -property catalog_productLineVersion
 
+          Write-Host ""
+          Write-Host "--- Installation version ---"
+          & $vswhere `
+            -latest `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+            -property installationVersion
+
+          Write-Host ""
+          Write-Host "--- Full JSON ---"
+          & $vswhere `
+            -latest `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+            -format json
 
       - name: Build ghostwriter
         shell: pwsh
         run: |
-          $craft = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft"
-
-          $craftVsWhere = Join-Path `
-            $craft `
-            "bin\3rdparty\vswhere\vswhere.exe"
-
-          $systemVsWhere = `
-            "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-
-          if (-not (Test-Path $craftVsWhere)) {
-            throw "Craft vswhere not found: $craftVsWhere"
-          }
-
-          Copy-Item `
-            $systemVsWhere `
-            $craftVsWhere `
-            -Force
-
-          Write-Host "Craft vswhere replaced."
-
-          $found = & $craftVsWhere `
-            -property installationPath `
-            -nologo `
-            -latest `
-            -products "*"
-
-          Write-Host "Craft will see Visual Studio at:"
-          Write-Host $found
-
-          if (-not $found) {
-            throw "Craft vswhere cannot find Visual Studio."
-          }
-
-          Write-Host ""
           Write-Host "Running Craft..."
 
           python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
@@ -442,7 +325,6 @@ jobs:
             -c `
             --install-deps `
             ghostwriter
-
 
       - name: Package ghostwriter
         shell: pwsh
