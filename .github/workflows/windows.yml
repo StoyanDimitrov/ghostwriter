@@ -123,7 +123,7 @@ jobs:
         shell: pwsh
         run: |
           $root = Join-Path "${{ github.workspace }}" "craft-work"
-          $config = Join-Path "${{ github.workspace }}" "craftmaster.ini"
+          $config = "${{ env.CRAFT_MASTER_CONFIG }}"
 
           @"
           [General]
@@ -139,17 +139,16 @@ jobs:
           General/KDECompiler = msvc2022
           General/Architecture = x64
 
-          [windows-cl-msvc2022-x86_64]
+          [$env:CRAFT_TARGET]
           General/KDECompiler = msvc2022
           General/Architecture = x64
           "@ | Set-Content -Encoding UTF8 $config
 
-          Write-Host "CraftMaster configuration:"
-          Write-Host "Path: $config"
-          Write-Host ""
+          Write-Host "Created CraftMaster configuration:"
+          Write-Host $config
 
           if (-not (Test-Path $config)) {
-            throw "CraftMaster configuration was not created: $config"
+              throw "CraftMaster configuration was not created: $config"
           }
 
           Get-Content $config
