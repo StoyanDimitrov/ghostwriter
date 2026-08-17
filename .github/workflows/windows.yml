@@ -319,37 +319,110 @@ jobs:
         run: |
           $vswhere = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\3rdparty\vswhere\vswhere.exe"
 
-          Write-Host "=== Exact component Craft is looking for ==="
+          Write-Host "=== vswhere ==="
+          Write-Host $vswhere
+          & $vswhere -version
+          Write-Host "Exit code: $LASTEXITCODE"
+
+          Write-Host ""
+          Write-Host "=== Any VS with VC.Tools ==="
+          & $vswhere `
+            -latest `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+            -property installationPath
+
+          Write-Host "Exit code: $LASTEXITCODE"
+
+          Write-Host ""
+          Write-Host "=== Exact component Craft is expected to use ==="
+
+          $component = "Microsoft.VisualStudio.Component.VCv143.x86.x64"
+
+          Write-Host "Component:"
+          Write-Host $component
+
+          Write-Host ""
+          Write-Host "=== vswhere with exact component ==="
+
+          & $vswhere `
+            -latest `
+            -products "*" `
+            -requires $component `
+            -property installationPath
+
+          Write-Host "Exit code: $LASTEXITCODE"
+
+          Write-Host ""
+          Write-Host "=== Craft-style command with duplicate -products ==="
 
           & $vswhere `
             -property installationPath `
             -nologo `
             -latest `
             -products "*" `
-            -version "[17,18)" `
-            -requires "Microsoft.VisualStudio.Component.VC.v143.x86.x64"
+            -products "*" `
+            -requires $component
+
+          Write-Host "Exit code: $LASTEXITCODE"
 
           Write-Host ""
-          Write-Host "=== Exact command with Craft's duplicate -products ==="
+          Write-Host "=== Installed VC components from vswhere JSON ==="
 
-          & $vswhere `
-            -property installationPath `
-            -nologo `
+          $json = & $vswhere `
             -latest `
             -products "*" `
-            -version "[17,18)" `
-            -products "*" `
-            -requires "Microsoft.VisualStudio.Component.VC.v143.x86.x64"
+            -format json
+
+          $instances = $json | ConvertFrom-Json
+
+          foreach ($instance in $instances) {
+            Write-Host ""
+            Write-Host "Installation: $($instance.installationPath)"
+
+            if ($instance.catalog.productLineVersion) {
+              Write-Host "Product line: $($instance.catalog.productLineVersion)"
+            }
+
+            if ($instance.properties) {
+              Write-Host "Properties:"
+              $instance.properties.psobject.Properties |
+                ForEach-Object {
+                  Write-Host "  $($_.Name) = $($_.Value)"
+                }
+            }
+          }
 
           Write-Host ""
-          Write-Host "=== Check installed VC components ==="
+          Write-Host "=== VC toolset directories ==="
 
-          & $vswhere `
-            -latest `
-            -products "*" `
-            -format json `
-            -utf8 |
-            Select-String "Microsoft.VisualStudio.Component.VC"
+          $vcTools = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"
+
+          if (Test-Path $vcTools) {
+            Get-ChildItem $vcTools -Directory |
+              Select-Object -ExpandProperty Name
+          }
+          else {
+            Write-Host "VC tools directory does not exist:"
+            Write-Host $vcTools
+          }
+
+          Write-Host ""
+          Write-Host "=== Direct CraftSetupHelper values ==="
+
+          $craftSetup = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\CraftSetupHelper.py"
+
+          Select-String `
+            -Path $craftSetup `
+            -Pattern "getMsvcPlatformToolset|VCv143|Microsoft.VisualStudio.Component.VC\." `
+            -Context 2,3 |
+            ForEach-Object {
+              Write-Host ""
+              Write-Host "$($_.Path):$($_.LineNumber)"
+              $_.Context.PreContext | ForEach-Object { Write-Host $_ }
+              Write-Host ">>> $($_.Line)"
+              $_.Context.PostContext | ForEach-Object { Write-Host $_ }
+            }
 
       - name: Build ghostwriter
         shell: pwsh
