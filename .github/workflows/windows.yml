@@ -556,26 +556,45 @@ jobs:
             }
 
 
-      - name: Diagnose actual Craft MSVC lookup
+      - name: Show Craft environment
         shell: pwsh
         run: |
-          $craft = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft"
+          $craftRoot = "${{ github.workspace }}\craft-work"
 
-          Write-Host "=== CraftSettings.ini ==="
-          Get-Content `
-            "$craft\etc\CraftSettings.ini" `
+          Write-Host "=== Craft root ==="
+          Get-ChildItem $craftRoot
+
+          Write-Host ""
+          Write-Host "=== Target directory ==="
+          Get-ChildItem `
+            "$craftRoot\${{ env.CRAFT_TARGET }}" `
             -ErrorAction Stop
 
           Write-Host ""
-          Write-Host "=== Running Craft with verbose logging ==="
+          Write-Host "=== Searching for CraftSettings.ini ==="
 
-          python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
-            --config "${{ env.CRAFT_MASTER_CONFIG }}" `
-            --targets "${{ env.CRAFT_TARGET }}" `
-            --verbose `
-            -c `
-            --install-deps `
-            ghostwriter
+          Get-ChildItem `
+            "$craftRoot\${{ env.CRAFT_TARGET }}" `
+            -Recurse `
+            -File `
+            -Filter "CraftSettings.ini" `
+            -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              Write-Host $_.FullName
+            }
+
+          Write-Host ""
+          Write-Host "=== Searching for Craft settings files ==="
+
+          Get-ChildItem `
+            "$craftRoot\${{ env.CRAFT_TARGET }}" `
+            -Recurse `
+            -File `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -match "CraftSettings|settings"
+            } |
+            Select-Object FullName
 
       - name: Build ghostwriter
         shell: pwsh
