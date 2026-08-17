@@ -314,6 +314,43 @@ jobs:
             -requires "Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
             -format json
 
+      - name: Diagnose exact Craft VS component
+        shell: pwsh
+        run: |
+          $vswhere = "${{ github.workspace }}\craft-work\${{ env.CRAFT_TARGET }}\craft\bin\3rdparty\vswhere\vswhere.exe"
+
+          Write-Host "=== Exact component Craft is looking for ==="
+
+          & $vswhere `
+            -property installationPath `
+            -nologo `
+            -latest `
+            -products "*" `
+            -version "[17,18)" `
+            -requires "Microsoft.VisualStudio.Component.VC.v143.x86.x64"
+
+          Write-Host ""
+          Write-Host "=== Exact command with Craft's duplicate -products ==="
+
+          & $vswhere `
+            -property installationPath `
+            -nologo `
+            -latest `
+            -products "*" `
+            -version "[17,18)" `
+            -products "*" `
+            -requires "Microsoft.VisualStudio.Component.VC.v143.x86.x64"
+
+          Write-Host ""
+          Write-Host "=== Check installed VC components ==="
+
+          & $vswhere `
+            -latest `
+            -products "*" `
+            -format json `
+            -utf8 |
+            Select-String "Microsoft.VisualStudio.Component.VC"
+
       - name: Build ghostwriter
         shell: pwsh
         run: |
