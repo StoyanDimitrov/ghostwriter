@@ -148,6 +148,52 @@ jobs:
           Write-Host "CraftMaster configuration:"
           Get-Content "${{ env.CRAFT_MASTER_CONFIG }}"
 
+      - name: Set up Visual Studio environment
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere.exe not found at $vswhere"
+          }
+
+          Write-Host "Visual Studio installations:"
+          & $vswhere -products * -format table
+
+          $vsPath = & $vswhere `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+
+          if (-not $vsPath) {
+            throw "Could not find Visual Studio with the MSVC x64 C++ component."
+          }
+
+          $vsPath = $vsPath.Trim()
+
+          Write-Host "Using Visual Studio:"
+          Write-Host $vsPath
+
+          $vsdevcmd = Join-Path $vsPath "Common7\Tools\VsDevCmd.bat"
+
+          if (-not (Test-Path $vsdevcmd)) {
+            throw "VsDevCmd.bat not found at $vsdevcmd"
+          }
+
+          cmd /c "`"$vsdevcmd`" -arch=x64 -host_arch=x64 && set" |
+            ForEach-Object {
+              if ($_ -match '^(.*?)=(.*)$') {
+                "$($matches[1])=$($matches[2])" >> $env:GITHUB_ENV
+              }
+            }
+
+          Write-Host "MSVC:"
+          where.exe cl
+
+          Write-Host "CMake:"
+          where.exe cmake
+
       - name: Set up Craft
         shell: pwsh
         run: |
