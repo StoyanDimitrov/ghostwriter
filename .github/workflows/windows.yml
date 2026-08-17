@@ -1,0 +1,260 @@
+name: Windows build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build upstream ghostwriter
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout workflow
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Install Craft
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+          python -m pip install --upgrade certifi
+
+          iex ((New-Object Net.WebClient).DownloadString(
+            'https://raw.githubusercontent.com/KDE/craft/master/setup/install_craft.ps1'
+          ))
+
+      - name: Clone upstream ghostwriter
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch master `
+            https://github.com/KDE/ghostwriter.git `
+            "$env:GITHUB_WORKSPACE\upstream"
+
+      - name: Create Craft blueprint
+        shell: pwsh
+        run: |
+          $blueprintDir =
+            "$env:USERPROFILE\CraftRoot\craft-blueprints-kde\kde\ghostwriter"
+
+          New-Item -ItemType Directory -Force $blueprintDir | Out-Null
+
+          @'
+          import info
+
+          from Package.CMakePackageBase import CMakePackageBase
+
+
+          class subinfo(info.infoclass):
+
+              def setTargets(self):
+                  self.displayName = "ghostwriter"
+                  self.description = "Text editor for Markdown"
+                  self.webpage = "https://github.com/KDE/ghostwriter"
+
+                  self.svnTargets["master"] = \
+                      "https://github.com/KDE/ghostwriter.git|master"
+
+                  self.defaultTarget = "master"
+
+              def setDependencies(self):
+                  self.buildDependencies[
+                      "kde/frameworks/extra-cmake-modules"
+                  ] = None
+
+                  self.runtimeDependencies["libs/qt/qtbase"] = None
+                  self.runtimeDependencies["libs/qt/qtsvg"] = None
+                  self.runtimeDependencies["libs/qt/qtwebchannel"] = None
+                  self.runtimeDependencies["libs/qt/qtwebengine"] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier1/kcoreaddons"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier1/kwidgetsaddons"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier1/sonnet"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier2/kconfig"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier3/kconfigwidgets"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier3/kxmlgui"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier1/breeze-icons"
+                  ] = None
+
+                  self.runtimeDependencies[
+                      "kde/frameworks/tier3/kiconthemes"
+                  ] = None
+
+
+          class Package(CMakePackageBase):
+
+              def __init__(self, **args):
+                  CMakePackageBase.__init__(self, **args)
+
+              def createPackage(self):
+                  self.defines["appname"] = "ghostwriter"
+                  self.defines["shortcuts"] = [{
+                      "name": "ghostwriter",
+                      "target": "bin/ghostwriter.exe"
+                  }]
+                  return super().createPackage()
+          '@ | Set-Content -Encoding UTF8 `
+              "$blueprintDir\ghostwriter.py"
+
+      - name: Build upstream ghostwriter
+        shell: pwsh
+        run: |
+          $craft = "$env:USERPROFILE\CraftRoot\craft\bin\craft.exe"
+
+          & $craft `
+            --ignoreInstalled `
+            --options ghostwriter.srcDir="$env:GITHUB_WORKSPACE\upstream" `
+            ghostwriter
+
+      - name: Create Windows installer
+        shell: pwsh
+        run: |
+          $craft = "$env:USERPROFILE\CraftRoot\craft\bin\craft.exe"
+
+          & $craft `
+            --options ghostwriter.srcDir="$env:GITHUB_WORKSPACE\upstream" `
+            --package `
+            ghostwriter
+
+      - name: Find installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem `
+            "$env:USERPROFILE\CraftRoot\tmp" `
+            -Filter "ghostwriter*.exe" `
+            -File `
+            -Recurse |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if (-not $installer) {
+            Write-Error "Craft did not produce a ghostwriter installer."
+            exit 1
+          }
+
+          Write-Host "Installer: $($installer.FullName)"
+
+          Copy-Item `
+            $installer.FullName `
+            "$env:GITHUB_WORKSPACE\ghostwriter-windows-x64-installer.exe"
+
+      - name: Locate installed application
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem `
+            "$env:USERPROFILE\CraftRoot" `
+            -Filter "ghostwriter.exe" `
+            -File `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.FullName -notmatch "\\tmp\\"
+            } |
+            Select-Object -First 1
+
+          if (-not $exe) {
+            Write-Error "Could not find ghostwriter.exe."
+            exit 1
+          }
+
+          Write-Host "Executable: $($exe.FullName)"
+
+          "GHOSTWRITER_ROOT=$($exe.Directory.Parent.FullName)" `
+            >> $env:GITHUB_ENV
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $root = $env:GHOSTWRITER_ROOT
+
+          if (-not (Test-Path "$root\bin\ghostwriter.exe")) {
+            Write-Error "Expected $root\bin\ghostwriter.exe"
+            Get-ChildItem $root -Recurse -File |
+              Select-Object -First 100 |
+              ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
+          New-Item -ItemType Directory -Force `
+            "$env:GITHUB_WORKSPACE\portable\ghostwriter" | Out-Null
+
+          Copy-Item `
+            "$root\*" `
+            "$env:GITHUB_WORKSPACE\portable\ghostwriter" `
+            -Recurse `
+            -Force
+
+          Compress-Archive `
+            -Path "$env:GITHUB_WORKSPACE\portable\ghostwriter\*" `
+            -DestinationPath `
+              "$env:GITHUB_WORKSPACE\ghostwriter-windows-x64-portable.zip" `
+            -Force
+
+      - name: Verify portable ZIP
+        shell: pwsh
+        run: |
+          $zip = "$env:GITHUB_WORKSPACE\ghostwriter-windows-x64-portable.zip"
+
+          if (-not (Test-Path $zip)) {
+            Write-Error "Portable ZIP was not created."
+            exit 1
+          }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+          $archive = `
+            [System.IO.Compression.ZipFile]::OpenRead($zip)
+
+          $exe = $archive.Entries |
+            Where-Object { $_.FullName -eq "bin/ghostwriter.exe" }
+
+          if (-not $exe) {
+            $archive.Dispose()
+            Write-Error "Portable ZIP does not contain bin/ghostwriter.exe."
+            exit 1
+          }
+
+          $archive.Dispose()
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostwriter-windows-x64-installer
+          path: ghostwriter-windows-x64-installer.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload portable Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostwriter-windows-x64-portable
+          path: ghostwriter-windows-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 30
