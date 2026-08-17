@@ -7,45 +7,50 @@ on:
 permissions:
   contents: read
 
+env:
+  CRAFT_TARGET: windows-msvc2022_64
+  CRAFT_MASTER_LOCATION: ${{ github.workspace }}/CraftMaster
+  CRAFT_MASTER_CONFIG: ${{ github.workspace }}/craftmaster.ini
+
 jobs:
   build:
-    name: Build upstream ghostwriter
+    name: Build ghostwriter
     runs-on: windows-2022
 
     steps:
       - name: Checkout workflow
         uses: actions/checkout@v4
 
-      - name: Install Python
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
-      - name: Install Craft
+      - name: Download CraftMaster
         shell: pwsh
         run: |
-          Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+          git clone -q --depth=1 `
+            https://invent.kde.org/packaging/craftmaster.git `
+            "$env:CRAFT_MASTER_LOCATION"
 
-          python -m pip install --upgrade certifi
-
-          iex ((New-Object Net.WebClient).DownloadString(
-            'https://raw.githubusercontent.com/KDE/craft/master/setup/install_craft.ps1'
-          ))
-
-      - name: Clone upstream ghostwriter
+      - name: Set up Craft
         shell: pwsh
         run: |
-          git clone --depth 1 --branch master `
-            https://github.com/KDE/ghostwriter.git `
-            "$env:GITHUB_WORKSPACE\upstream"
+          python "$env:CRAFT_MASTER_LOCATION/CraftMaster.py" `
+            --config "$env:CRAFT_MASTER_CONFIG" `
+            --target "$env:CRAFT_TARGET" `
+            -c craft
 
-      - name: Create Craft blueprint
+      - name: Create ghostwriter blueprint
         shell: pwsh
         run: |
-          $blueprintDir =
-            "$env:USERPROFILE\CraftRoot\craft-blueprints-kde\kde\ghostwriter"
+          $blueprintDir = `
+            "${{ github.workspace }}\ghostwriter-blueprints\kde\ghostwriter"
 
-          New-Item -ItemType Directory -Force $blueprintDir | Out-Null
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $blueprintDir | Out-Null
 
           @'
           import info
@@ -120,141 +125,18 @@ jobs:
                       "target": "bin/ghostwriter.exe"
                   }]
                   return super().createPackage()
-          '@ | Set-Content -Encoding UTF8 `
-              "$blueprintDir\ghostwriter.py"
+          '@ | Set-Content `
+            -Encoding UTF8 `
+            "$blueprintDir\ghostwriter.py"
 
-      - name: Build upstream ghostwriter
+      - name: Build ghostwriter
         shell: pwsh
         run: |
-          $craft = "$env:USERPROFILE\CraftRoot\craft\bin\craft.exe"
-
-          & $craft `
-            --ignoreInstalled `
-            --options ghostwriter.srcDir="$env:GITHUB_WORKSPACE\upstream" `
+          python "$env:CRAFT_MASTER_LOCATION/CraftMaster.py" `
+            --config "$env:CRAFT_MASTER_CONFIG" `
+            --target "$env:CRAFT_TARGET" `
+            --add-blueprint-repository `
+            "${{ github.workspace }}/ghostwriter-blueprints" `
+            -c `
+            --options ghostwriter.srcDir="${{ github.workspace }}/upstream" `
             ghostwriter
-
-      - name: Create Windows installer
-        shell: pwsh
-        run: |
-          $craft = "$env:USERPROFILE\CraftRoot\craft\bin\craft.exe"
-
-          & $craft `
-            --options ghostwriter.srcDir="$env:GITHUB_WORKSPACE\upstream" `
-            --package `
-            ghostwriter
-
-      - name: Find installer
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem `
-            "$env:USERPROFILE\CraftRoot\tmp" `
-            -Filter "ghostwriter*.exe" `
-            -File `
-            -Recurse |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-
-          if (-not $installer) {
-            Write-Error "Craft did not produce a ghostwriter installer."
-            exit 1
-          }
-
-          Write-Host "Installer: $($installer.FullName)"
-
-          Copy-Item `
-            $installer.FullName `
-            "$env:GITHUB_WORKSPACE\ghostwriter-windows-x64-installer.exe"
-
-      - name: Locate installed application
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem `
-            "$env:USERPROFILE\CraftRoot" `
-            -Filter "ghostwriter.exe" `
-            -File `
-            -Recurse `
-            -ErrorAction SilentlyContinue |
-            Where-Object {
-              $_.FullName -notmatch "\\tmp\\"
-            } |
-            Select-Object -First 1
-
-          if (-not $exe) {
-            Write-Error "Could not find ghostwriter.exe."
-            exit 1
-          }
-
-          Write-Host "Executable: $($exe.FullName)"
-
-          "GHOSTWRITER_ROOT=$($exe.Directory.Parent.FullName)" `
-            >> $env:GITHUB_ENV
-
-      - name: Create portable ZIP
-        shell: pwsh
-        run: |
-          $root = $env:GHOSTWRITER_ROOT
-
-          if (-not (Test-Path "$root\bin\ghostwriter.exe")) {
-            Write-Error "Expected $root\bin\ghostwriter.exe"
-            Get-ChildItem $root -Recurse -File |
-              Select-Object -First 100 |
-              ForEach-Object { Write-Host $_.FullName }
-            exit 1
-          }
-
-          New-Item -ItemType Directory -Force `
-            "$env:GITHUB_WORKSPACE\portable\ghostwriter" | Out-Null
-
-          Copy-Item `
-            "$root\*" `
-            "$env:GITHUB_WORKSPACE\portable\ghostwriter" `
-            -Recurse `
-            -Force
-
-          Compress-Archive `
-            -Path "$env:GITHUB_WORKSPACE\portable\ghostwriter\*" `
-            -DestinationPath `
-              "$env:GITHUB_WORKSPACE\ghostwriter-windows-x64-portable.zip" `
-            -Force
-
-      - name: Verify portable ZIP
-        shell: pwsh
-        run: |
-          $zip = "$env:GITHUB_WORKSPACE\ghostwriter-windows-x64-portable.zip"
-
-          if (-not (Test-Path $zip)) {
-            Write-Error "Portable ZIP was not created."
-            exit 1
-          }
-
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-          $archive = `
-            [System.IO.Compression.ZipFile]::OpenRead($zip)
-
-          $exe = $archive.Entries |
-            Where-Object { $_.FullName -eq "bin/ghostwriter.exe" }
-
-          if (-not $exe) {
-            $archive.Dispose()
-            Write-Error "Portable ZIP does not contain bin/ghostwriter.exe."
-            exit 1
-          }
-
-          $archive.Dispose()
-
-      - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: ghostwriter-windows-x64-installer
-          path: ghostwriter-windows-x64-installer.exe
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload portable Windows build
-        uses: actions/upload-artifact@v4
-        with:
-          name: ghostwriter-windows-x64-portable
-          path: ghostwriter-windows-x64-portable.zip
-          if-no-files-found: error
-          retention-days: 30
