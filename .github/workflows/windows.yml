@@ -153,13 +153,6 @@ jobs:
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 
-          if (-not (Test-Path $vswhere)) {
-            throw "vswhere.exe not found at $vswhere"
-          }
-
-          Write-Host "Visual Studio installations:"
-          & $vswhere -products * -format table
-
           $vsPath = & $vswhere `
             -latest `
             -products * `
@@ -167,32 +160,54 @@ jobs:
             -property installationPath
 
           if (-not $vsPath) {
-            throw "Could not find Visual Studio with the MSVC x64 C++ component."
+            throw "Visual Studio 2022 with MSVC was not found."
           }
 
           $vsPath = $vsPath.Trim()
 
-          Write-Host "Using Visual Studio:"
-          Write-Host $vsPath
+          Write-Host "Visual Studio: $vsPath"
 
-          $vsdevcmd = Join-Path $vsPath "Common7\Tools\VsDevCmd.bat"
+          $vsDevCmd = Join-Path `
+            $vsPath `
+            "Common7\Tools\VsDevCmd.bat"
 
-          if (-not (Test-Path $vsdevcmd)) {
-            throw "VsDevCmd.bat not found at $vsdevcmd"
+          if (-not (Test-Path $vsDevCmd)) {
+            throw "VsDevCmd.bat not found: $vsDevCmd"
           }
 
-          cmd /c "`"$vsdevcmd`" -arch=x64 -host_arch=x64 && set" |
-            ForEach-Object {
-              if ($_ -match '^(.*?)=(.*)$') {
-                "$($matches[1])=$($matches[2])" >> $env:GITHUB_ENV
+          # Import the complete VS developer environment into
+          # the GitHub Actions environment.
+          $envDump = cmd.exe /s /c `
+            "`"$vsDevCmd`" -arch=x64 -host_arch=x64 && set"
+
+          foreach ($line in $envDump) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              $name = $matches[1]
+              $value = $matches[2]
+
+              # Avoid writing pseudo variables.
+              if ($name -and $value) {
+                "$name=$value" >> $env:GITHUB_ENV
+                Set-Item "env:$name" $value
               }
             }
+          }
 
-          Write-Host "MSVC:"
+          Write-Host ""
+          Write-Host "VSINSTALLDIR=$env:VSINSTALLDIR"
+          Write-Host "VCINSTALLDIR=$env:VCINSTALLDIR"
+
+          Write-Host ""
+          Write-Host "cl.exe:"
           where.exe cl
 
-          Write-Host "CMake:"
+          Write-Host ""
+          Write-Host "cmake.exe:"
           where.exe cmake
+
+          Write-Host ""
+          Write-Host "MSBuild.exe:"
+          where.exe msbuild
 
       - name: Set up Craft
         shell: pwsh
@@ -216,15 +231,45 @@ jobs:
             "$craftRoot\${{ env.CRAFT_TARGET }}\etc\CraftSettings.ini" `
             -ErrorAction Stop
 
+
       - name: Build ghostwriter
         shell: pwsh
         run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+
+          $vsPath = & $vswhere `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+
+          $vsPath = $vsPath.Trim()
+
+          $vsDevCmd = Join-Path `
+            $vsPath `
+            "Common7\Tools\VsDevCmd.bat"
+
+          $envDump = cmd.exe /s /c `
+            "`"$vsDevCmd`" -arch=x64 -host_arch=x64 && set"
+
+          foreach ($line in $envDump) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              Set-Item "env:$($matches[1])" $matches[2]
+            }
+          }
+
+          Write-Host "VSINSTALLDIR=$env:VSINSTALLDIR"
+          Write-Host "VCINSTALLDIR=$env:VCINSTALLDIR"
+
+          where.exe cl
+
           python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
             --config "${{ env.CRAFT_MASTER_CONFIG }}" `
             --targets "${{ env.CRAFT_TARGET }}" `
             -c `
             --install-deps `
             ghostwriter
+
 
       - name: Package ghostwriter
         shell: pwsh
