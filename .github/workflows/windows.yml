@@ -122,7 +122,8 @@ jobs:
       - name: Create CraftMaster configuration
         shell: pwsh
         run: |
-          $root = "${{ github.workspace }}\craft-work"
+          $root = Join-Path "${{ github.workspace }}" "craft-work"
+          $config = Join-Path "${{ github.workspace }}" "craftmaster.ini"
 
           @"
           [General]
@@ -141,79 +142,17 @@ jobs:
           [windows-cl-msvc2022-x86_64]
           General/KDECompiler = msvc2022
           General/Architecture = x64
-          "@
+          "@ | Set-Content -Encoding UTF8 $config
 
           Write-Host "CraftMaster configuration:"
-          Get-Content "${{ env.CRAFT_MASTER_CONFIG }}"
+          Write-Host "Path: $config"
+          Write-Host ""
 
-      - name: Set up Visual Studio environment
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-
-          $vsPath = & $vswhere `
-            -latest `
-            -products * `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -property installationPath
-
-          if (-not $vsPath) {
-            throw "Visual Studio 2022 with MSVC was not found."
+          if (-not (Test-Path $config)) {
+            throw "CraftMaster configuration was not created: $config"
           }
 
-          $vsPath = $vsPath.Trim()
-
-          Write-Host "Visual Studio: $vsPath"
-
-          $vsDevCmd = Join-Path `
-            $vsPath `
-            "Common7\Tools\VsDevCmd.bat"
-
-          if (-not (Test-Path $vsDevCmd)) {
-            throw "VsDevCmd.bat not found: $vsDevCmd"
-          }
-
-          # Import the complete VS developer environment into
-          # the GitHub Actions environment.
-          $envDump = cmd.exe /s /c `
-            "`"$vsDevCmd`" -arch=x64 -host_arch=x64 && set"
-
-          foreach ($line in $envDump) {
-            if ($line -match '^([^=]+)=(.*)$') {
-              $name = $matches[1]
-              $value = $matches[2]
-
-              # Avoid writing pseudo variables.
-              if ($name -and $value) {
-                "$name=$value" >> $env:GITHUB_ENV
-                Set-Item "env:$name" $value
-              }
-            }
-          }
-
-          Write-Host ""
-          Write-Host "VSINSTALLDIR=$env:VSINSTALLDIR"
-          Write-Host "VCINSTALLDIR=$env:VCINSTALLDIR"
-
-          Write-Host ""
-          Write-Host "cl.exe:"
-          where.exe cl
-
-          Write-Host ""
-          Write-Host "cmake.exe:"
-          where.exe cmake
-
-          Write-Host ""
-          Write-Host "MSBuild.exe:"
-          where.exe msbuild
-
-      - name: Set up Craft
-        shell: pwsh
-        run: |
-          python "${{ env.CRAFT_MASTER_LOCATION }}/CraftMaster.py" `
-            --config "${{ env.CRAFT_MASTER_CONFIG }}" `
-            --targets "${{ env.CRAFT_TARGET }}" `
-            --setup
+          Get-Content $config
 
       - name: Show Craft environment
         shell: pwsh
